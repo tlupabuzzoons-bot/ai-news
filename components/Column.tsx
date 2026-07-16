@@ -17,7 +17,7 @@ interface Props {
 export default function Column({ def, stories, now, newIds, failingSources = [], retrying, onRetry }: Props) {
   return (
     <section
-      className="flex w-[230px] shrink-0 flex-col overflow-hidden rounded-xl border border-[#0f1e35] bg-[#0c1628]"
+      className="flex min-w-[230px] flex-1 flex-col overflow-hidden rounded-xl border border-[#0f1e35] bg-[#0c1628]"
       style={{ '--accent': def.accent } as React.CSSProperties}
     >
       <header

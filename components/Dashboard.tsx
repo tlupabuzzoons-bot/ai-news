@@ -183,7 +183,7 @@ export default function Dashboard() {
 
 function SkeletonColumn({ label, accent, dark }: { label: string; accent: string; dark: string }) {
   return (
-    <section className="w-[230px] shrink-0 overflow-hidden rounded-xl border border-[#0f1e35] bg-[#0c1628]">
+    <section className="min-w-[230px] flex-1 overflow-hidden rounded-xl border border-[#0f1e35] bg-[#0c1628]">
       <header
         className="px-3.5 py-2.5"
         style={{ background: `linear-gradient(135deg, ${dark}88, #0c1628)` }}

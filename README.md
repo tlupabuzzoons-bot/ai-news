@@ -1,36 +1,115 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Daily Brief
 
-## Getting Started
+Self-hosted dashboard that continuously ingests AI/tech news (RSS + X), summarises every story
+into one short headline + one sentence with Claude, and renders them in colour-coded columns,
+newest → oldest.
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+[cron: every 20 min]
+      ↓
+  fetchers (RSS feeds + X via API or Nitter mirrors)
+      ↓
+  dedupe (URL hash + fuzzy title match)
+      ↓
+  summarise (batched, 10 stories per model call)
+      ↓
+  SQLite / Postgres: stories table
+      ↓
+[GET /api/stories]  ← client polls every 60s
+      ↓
+  React dashboard (renders instantly from cache)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Ingestion is fully decoupled from rendering — the frontend never calls a model and never waits
+on a fetch.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+That's it. On first boot the server ingests all sources automatically (~1 min with Claude
+summarisation). **No API key is required** — see providers below.
 
-To learn more about Next.js, take a look at the following resources:
+## Summarisation providers (auto-detected)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Provider | Requirement | Notes |
+|---|---|---|
+| `claude-cli` | `claude` CLI on PATH, logged in | Uses your Claude subscription — no API key. Local default. |
+| `gemini` | `GEMINI_API_KEY` (free tier) | https://aistudio.google.com/apikey — the free path for Vercel. |
+| `heuristic` | nothing | Cleaned title + first sentence, source-default category. Last resort. |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Force one with `SUMMARISER=claude-cli|gemini|heuristic`.
 
-## Deploy on Vercel
+## Environment variables (all optional)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+See `.env.example`. `CRON_SECRET` protects `/api/cron/ingest` (required for Vercel Cron);
+`X_BEARER_TOKEN` switches the social column from Nitter mirrors to the real X API v2 (~$100/mo);
+`DATABASE_URL` switches storage from SQLite to Postgres.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Adding a source
+
+Add one entry to `RSS_SOURCES` in `lib/sources.ts`:
+
+```ts
+{ name: 'My Feed', url: 'https://example.com/feed', category: 'tools', aiFilter: true },
+```
+
+- `category` — fallback column before Claude classifies
+- `aiFilter` — apply the AI keyword allowlist (for general-news feeds); AI-only feeds set `false`
+- `maxPerRun` — optional cap per run (default 25; arXiv feeds use 10)
+
+X handles live in `X_HANDLES` in `lib/ingest/x.ts`.
+
+## API
+
+- `GET /api/stories` — the dashboard's data source (per-category cap 50, hidden dupes excluded)
+- `POST /api/ingest` — manual run; `?category=models` re-runs only that column's sources
+- `GET /api/cron/ingest` — scheduler entry, requires `Authorization: Bearer $CRON_SECRET`
+- `GET /api/health` — last run / last success / last error per source
+
+## Dedupe
+
+1. sha256 over a normalised URL (tracking params, www, trailing slash stripped) — UNIQUE index
+2. fuzzy raw-title match (token Jaccard ≥ 0.85, diacritics-insensitive) against the last 3 days
+3. after summarisation: generated-headline match (≥ 0.72) per category hides cross-outlet
+   paraphrases of the same story
+
+## Tests
+
+```bash
+npm test   # vitest: dedupe, JSON-parse fallback, backoff timing
+```
+
+## Deploying to Vercel
+
+```bash
+vercel --prod
+```
+
+Storage on Vercel:
+
+- **Zero-config (default)** — SQLite in `/tmp`: ephemeral per warm instance; the first request
+  after a cold start triggers a background re-ingest (skeleton shows meanwhile). Fine for
+  personal use.
+- **Durable** — set `DATABASE_URL` to any Postgres (e.g. free Neon via Vercel Marketplace);
+  the schema creates itself.
+
+Also set on Vercel:
+
+- `CRON_SECRET` — required, protects the cron endpoint (Vercel sends it automatically)
+- `GEMINI_API_KEY` — recommended; without it summaries fall back to the heuristic (the Claude
+  CLI doesn't exist on Vercel)
+
+`vercel.json` schedules `/api/cron/ingest` every 20 minutes — that needs a **Pro** plan.
+On Hobby (daily cron limit) either change the schedule to `0 6 * * *` or point a free external
+pinger (e.g. cron-job.org) at the endpoint with the bearer header every 20 min.
+
+## Known limitations
+
+- Nitter mirrors are unreliable by nature; the social column hides itself when they're all down.
+- The Anthropic blog has no public RSS feed (needs a scraper — TODO).
+- The AI keyword allowlist (spec-mandated, includes `model`/`agent`) occasionally lets a
+  borderline story through; the classifier usually files it sensibly.

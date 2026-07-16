@@ -66,9 +66,16 @@ X handles live in `X_HANDLES` in `lib/ingest/x.ts`.
 ## API
 
 - `GET /api/stories` — the dashboard's data source (per-category cap 50, hidden dupes excluded)
-- `POST /api/ingest` — manual run; `?category=models` re-runs only that column's sources
+- `POST /api/ingest` — manual run; `?category=models` re-runs only that column's sources.
+  Same-origin only, 30s cooldown per scope (a `CRON_SECRET` bearer bypasses both)
 - `GET /api/cron/ingest` — scheduler entry, requires `Authorization: Bearer $CRON_SECRET`
 - `GET /api/health` — last run / last success / last error per source
+
+Failed summarisations (`needs_review=1`) get exactly one retry on a later idle run;
+a second failure marks them final (`needs_review=2`), keeping the raw title as headline.
+Note: with multiple serverless instances sharing one Postgres, cron + manual runs on
+different instances can occasionally double-summarise a batch (bounded token waste,
+no data corruption).
 
 ## Dedupe
 

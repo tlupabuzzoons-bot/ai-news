@@ -40,6 +40,10 @@ export async function pendingSummaries(limit = 100): Promise<PendingStory[]> {
   return (await driver()).pendingSummaries(limit);
 }
 
+export async function failedSummaries(limit = 20, maxAgeHours = 24): Promise<PendingStory[]> {
+  return (await driver()).failedSummaries(limit, maxAgeHours);
+}
+
 export async function applySummary(
   id: string,
   headline: string,
@@ -49,8 +53,8 @@ export async function applySummary(
   return (await driver()).applySummary(id, headline, summary, category);
 }
 
-export async function markSummariseFailed(id: string): Promise<void> {
-  return (await driver()).markSummariseFailed(id);
+export async function markSummariseFailed(id: string, final = false): Promise<void> {
+  return (await driver()).markSummariseFailed(id, final);
 }
 
 export async function sourceHealth(): Promise<SourceHealth[]> {

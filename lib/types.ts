@@ -13,5 +13,6 @@ export interface Story {
   published_at: string; // ISO8601 — real publish time
   fetched_at: string; // ISO8601
   raw_title: string;
-  needs_review: 0 | 1;
+  /** 0 = summarised OK, 1 = failed once (retryable), 2 = failed twice (final) */
+  needs_review: number;
 }

@@ -33,8 +33,11 @@ export interface Driver {
   recordRun(run: IngestRun): Promise<void>;
   recentTitles(days: number): Promise<string[]>;
   pendingSummaries(limit: number): Promise<PendingStory[]>;
+  /** Once-failed summaries (needs_review=1) fresh enough to retry once more. */
+  failedSummaries(limit: number, maxAgeHours: number): Promise<PendingStory[]>;
   applySummary(id: string, headline: string, summary: string, category: string): Promise<void>;
-  markSummariseFailed(id: string): Promise<void>;
+  /** final=true (second failure) sets needs_review=2 — no further retries. */
+  markSummariseFailed(id: string, final: boolean): Promise<void>;
   sourceHealth(): Promise<SourceHealth[]>;
   /** Generated headlines of visible stories in a category (for paraphrase dedupe). */
   recentHeadlines(category: string, days: number, excludeId: string): Promise<string[]>;

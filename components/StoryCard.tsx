@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import type { Story } from '@/lib/types';
 import { relativeTime } from '@/lib/time';
 
@@ -9,7 +10,7 @@ interface Props {
   isNew?: boolean;
 }
 
-export default function StoryCard({ story, now, isNew }: Props) {
+function StoryCard({ story, now, isNew }: Props) {
   return (
     <article className={`story-card px-3.5 py-3 ${isNew ? 'story-new' : ''}`}>
       <a
@@ -42,3 +43,5 @@ export default function StoryCard({ story, now, isNew }: Props) {
     </article>
   );
 }
+
+export default memo(StoryCard);

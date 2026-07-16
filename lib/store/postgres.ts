@@ -96,8 +96,16 @@ export async function createDriver(): Promise<Driver> {
         WHERE id = ${id}`;
     },
 
-    async markSummariseFailed(id) {
-      await sql`UPDATE stories SET summarised = 1, needs_review = 1 WHERE id = ${id}`;
+    async failedSummaries(limit, maxAgeHours) {
+      const cutoff = new Date(Date.now() - maxAgeHours * 3_600_000).toISOString();
+      return (await sql`
+        SELECT id, raw_title, summary, source, category FROM stories
+        WHERE summarised = 1 AND needs_review = 1 AND fetched_at > ${cutoff}
+        ORDER BY fetched_at ASC LIMIT ${limit}`) as unknown as PendingStory[];
+    },
+
+    async markSummariseFailed(id, final) {
+      await sql`UPDATE stories SET summarised = 1, needs_review = ${final ? 2 : 1} WHERE id = ${id}`;
     },
 
     async sourceHealth() {

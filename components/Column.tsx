@@ -1,7 +1,7 @@
 'use client';
 
 import type { ColumnDef } from '@/lib/columns';
-import type { Story } from '@/lib/types';
+import type { Category, Story } from '@/lib/types';
 import StoryCard from './StoryCard';
 
 interface Props {
@@ -11,7 +11,7 @@ interface Props {
   newIds?: Set<string>;
   failingSources?: string[];
   retrying?: boolean;
-  onRetry?: () => void;
+  onRetry?: (category: Category) => void;
 }
 
 export default function Column({ def, stories, now, newIds, failingSources = [], retrying, onRetry }: Props) {
@@ -36,7 +36,12 @@ export default function Column({ def, stories, now, newIds, failingSources = [],
           {stories.length}
         </span>
       </header>
-      <div className="column-scroll max-h-[70vh] divide-y divide-[#0f1e35] overflow-y-auto">
+      <div
+        className="column-scroll max-h-[70vh] divide-y divide-[#0f1e35] overflow-y-auto"
+        tabIndex={0}
+        role="region"
+        aria-label={`${def.label} stories`}
+      >
         {stories.length === 0 ? (
           failingSources.length > 0 ? (
             <div className="px-3.5 py-6 text-center">
@@ -47,7 +52,7 @@ export default function Column({ def, stories, now, newIds, failingSources = [],
                 {failingSources.join(', ')}
               </p>
               <button
-                onClick={onRetry}
+                onClick={() => onRetry?.(def.key)}
                 disabled={retrying}
                 className="mt-3 rounded-md px-3 py-1 text-[10.5px] font-medium disabled:opacity-40"
                 style={{

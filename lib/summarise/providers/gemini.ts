@@ -67,6 +67,12 @@ export async function summariseBatchViaGemini(items: BatchItem[]): Promise<Summa
     }
 
     if (!result.ok) {
+      if (result.status === 404) {
+        console.log(
+          JSON.stringify({ event: 'gemini_model_not_found', model: GEMINI_MODEL, hint: 'set GEMINI_MODEL env' })
+        );
+        return null; // model name is wrong — retrying won't help
+      }
       console.log(JSON.stringify({ event: 'summarise_gemini_http', attempt, status: result.status }));
       if (result.status === 429 || result.status >= 500) {
         if (attempt === MAX_ATTEMPTS) return null;

@@ -29,9 +29,11 @@ export default function Dashboard() {
   const [retrying, setRetrying] = useState<Category | null>(null);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(() => Date.now());
+  const [offlineSince, setOfflineSince] = useState<Date | null>(null);
   const fetchingRef = useRef(false);
   const prevIdsRef = useRef<Set<string> | null>(null);
   const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownRef = useRef(POLL_INTERVAL_S);
 
   const load = useCallback(async () => {
     if (fetchingRef.current) return;
@@ -41,8 +43,12 @@ export default function Dashboard() {
         fetch('/api/stories', { cache: 'no-store' }),
         fetch('/api/health', { cache: 'no-store' }).catch(() => null),
       ]);
-      if (!storiesRes.ok) return;
+      if (!storiesRes.ok) {
+        setOfflineSince((prev) => prev ?? new Date());
+        return;
+      }
       const data: StoriesResponse = await storiesRes.json();
+      setOfflineSince(null);
 
       // diff against the previous poll — new stories get a ~2s highlight
       const ids = new Set(data.stories.map((s) => s.id));
@@ -70,9 +76,11 @@ export default function Dashboard() {
         setFailing(byCategory);
       }
     } catch {
-      // keep showing last good data
+      // keep showing last good data, but surface that we're stale
+      setOfflineSince((prev) => prev ?? new Date());
     } finally {
       fetchingRef.current = false;
+      countdownRef.current = POLL_INTERVAL_S;
       setCountdown(POLL_INTERVAL_S);
     }
   }, []);
@@ -82,16 +90,16 @@ export default function Dashboard() {
   }, [load]);
 
   // one shared 1s tick: countdown + live relative timestamps
+  // (load() is called from the tick itself, never from inside a state updater)
   useEffect(() => {
     const t = setInterval(() => {
       setNow(Date.now());
-      setCountdown((c) => {
-        if (c <= 1) {
-          load();
-          return POLL_INTERVAL_S;
-        }
-        return c - 1;
-      });
+      countdownRef.current -= 1;
+      if (countdownRef.current <= 0) {
+        countdownRef.current = POLL_INTERVAL_S;
+        load();
+      }
+      setCountdown(countdownRef.current);
     }, 1000);
     return () => clearInterval(t);
   }, [load]);
@@ -128,6 +136,8 @@ export default function Dashboard() {
   const total = stories?.length ?? 0;
   // empty DB means ingest is filling in the background — keep the skeleton up
   const coldStart = stories === null || stories.length === 0;
+  // cards only need ~30s granularity for "2h ago" — avoids re-rendering every card each second
+  const cardNow = now - (now % 30_000);
 
   return (
     <div className="min-h-screen bg-[#070c18] px-5 py-5 text-[#e2e8f0]">
@@ -144,6 +154,11 @@ export default function Dashboard() {
           <p className="text-[11px] tabular-nums text-[#64748b]">
             {total} stories · updated {updatedAt ? formatClock(updatedAt) : '—'} · next{' '}
             {formatCountdown(countdown)}
+            {offlineSince && (
+              <span className="ml-2 text-[#f59e0b]" role="status">
+                ⚠ offline since {formatClock(offlineSince)} — showing cached stories
+              </span>
+            )}
           </p>
         </div>
         <button
@@ -168,11 +183,11 @@ export default function Dashboard() {
               key={def.key}
               def={def}
               stories={stories.filter((s) => s.category === def.key)}
-              now={now}
+              now={cardNow}
               newIds={newIds}
               failingSources={failing[def.key] ?? []}
               retrying={retrying === def.key}
-              onRetry={() => retryCategory(def.key)}
+              onRetry={retryCategory}
             />
           )
         )}

@@ -1,5 +1,14 @@
+import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { runIngest } from '@/lib/ingest';
+
+export const maxDuration = 60;
+
+function constantTimeMatch(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
 
 /**
  * Vercel Cron entry point (vercel.json). Vercel sends GET with
@@ -8,7 +17,8 @@ import { runIngest } from '@/lib/ingest';
  */
 async function handle(req: Request) {
   const secret = process.env.CRON_SECRET;
-  if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
+  const header = req.headers.get('authorization') ?? '';
+  if (!secret || !constantTimeMatch(header, `Bearer ${secret}`)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
   const summary = await runIngest();

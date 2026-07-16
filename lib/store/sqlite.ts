@@ -114,8 +114,19 @@ export function createDriver(): Driver {
       ).run(headline, summary, category, id);
     },
 
-    async markSummariseFailed(id) {
-      db.prepare(`UPDATE stories SET summarised = 1, needs_review = 1 WHERE id = ?`).run(id);
+    async failedSummaries(limit, maxAgeHours) {
+      const cutoff = new Date(Date.now() - maxAgeHours * 3_600_000).toISOString();
+      return db
+        .prepare(
+          `SELECT id, raw_title, summary, source, category FROM stories
+           WHERE summarised = 1 AND needs_review = 1 AND fetched_at > ?
+           ORDER BY fetched_at ASC LIMIT ?`
+        )
+        .all(cutoff, limit) as PendingStory[];
+    },
+
+    async markSummariseFailed(id, final) {
+      db.prepare(`UPDATE stories SET summarised = 1, needs_review = ? WHERE id = ?`).run(final ? 2 : 1, id);
     },
 
     async sourceHealth() {

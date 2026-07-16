@@ -1,4 +1,5 @@
 import Parser from 'rss-parser';
+import { decodeEntities } from '../text';
 import type { CandidateItem } from './rss';
 
 /** Accounts from the spec §4 X query. Add a handle here to follow it. */
@@ -103,14 +104,14 @@ export async function fetchSocialViaNitter(handle: string): Promise<CandidateIte
   );
 }
 
-function mapNitterItems(
+export function mapNitterItems(
   handle: string,
   items: { title?: string; link?: string; isoDate?: string; pubDate?: string; contentSnippet?: string }[]
 ): CandidateItem[] {
   const cutoff = Date.now() - MAX_AGE_HOURS * 3_600_000;
   const results: CandidateItem[] = [];
   for (const item of items) {
-    const text = (item.title ?? '').trim();
+    const text = decodeEntities((item.title ?? '').trim());
     if (!text || text.startsWith('RT by')) continue; // spec query excludes retweets
     const publishedRaw = item.isoDate ?? item.pubDate;
     const published = publishedRaw ? new Date(publishedRaw) : null;
@@ -127,7 +128,7 @@ function mapNitterItems(
       title: text.slice(0, 280),
       url,
       publishedAt: published.toISOString(),
-      snippet: (item.contentSnippet ?? text).slice(0, 500),
+      snippet: decodeEntities((item.contentSnippet ?? text).trim()).slice(0, 500),
     });
     if (results.length >= MAX_PER_HANDLE) break;
   }

@@ -1,5 +1,6 @@
 import Parser from 'rss-parser';
 import { AI_KEYWORDS, type FeedSource } from '../sources';
+import { decodeEntities } from '../text';
 
 export interface CandidateItem {
   sourceName: string;
@@ -34,10 +35,10 @@ export function matchesAiKeywords(text: string): boolean {
 export async function fetchFeed(source: FeedSource): Promise<CandidateItem[]> {
   const feed = await parser.parseURL(source.url);
   const cutoff = Date.now() - MAX_AGE_HOURS * 3_600_000;
-  const items: CandidateItem[] = [];
+  const items: (CandidateItem & { feedIndex: number })[] = [];
 
-  for (const item of feed.items ?? []) {
-    const title = item.title?.trim();
+  for (const [feedIndex, item] of (feed.items ?? []).entries()) {
+    const title = item.title ? decodeEntities(item.title.trim()) : undefined;
     const url = item.link?.trim();
     if (!title || !url) continue;
 
@@ -46,7 +47,7 @@ export async function fetchFeed(source: FeedSource): Promise<CandidateItem[]> {
     if (!published || Number.isNaN(published.getTime())) continue; // spec: real pubDate only
     if (published.getTime() < cutoff) continue;
 
-    const snippet = (item.contentSnippet ?? item.summary ?? '').trim().slice(0, 500);
+    const snippet = decodeEntities((item.contentSnippet ?? item.summary ?? '').trim()).slice(0, 500);
     if (source.aiFilter && !matchesAiKeywords(`${title} ${snippet}`)) continue;
 
     items.push({
@@ -56,9 +57,11 @@ export async function fetchFeed(source: FeedSource): Promise<CandidateItem[]> {
       url,
       publishedAt: published.toISOString(),
       snippet,
+      feedIndex,
     });
   }
-  // newest first, capped so high-volume feeds (arXiv) can't flood the board
-  items.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
-  return items.slice(0, source.maxPerRun ?? DEFAULT_MAX_PER_RUN);
+  // newest first, capped so high-volume feeds (arXiv) can't flood the board;
+  // feed order breaks timestamp ties (arXiv stamps a whole day identically)
+  items.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt) || a.feedIndex - b.feedIndex);
+  return items.slice(0, source.maxPerRun ?? DEFAULT_MAX_PER_RUN).map(({ feedIndex: _, ...item }) => item);
 }

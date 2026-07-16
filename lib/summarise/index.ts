@@ -1,5 +1,12 @@
 import pLimit from 'p-limit';
-import { applySummary, hideStory, markSummariseFailed, pendingSummaries, recentHeadlines } from '../db';
+import {
+  applySummary,
+  failedSummaries,
+  hideStory,
+  markSummariseFailed,
+  pendingSummaries,
+  recentHeadlines,
+} from '../db';
 import { HEADLINE_THRESHOLD, isFuzzyDuplicate } from '../ingest/dedupe';
 import type { Category } from '../types';
 import type { BatchItem } from './prompt';
@@ -31,10 +38,20 @@ export interface SummariseSummary {
   durationMs: number;
 }
 
-export async function summarisePending(): Promise<SummariseSummary> {
+const RETRY_CAP = 20;
+const RETRY_MAX_AGE_HOURS = 24;
+
+export async function summarisePending(maxItems?: number): Promise<SummariseSummary> {
   const started = Date.now();
-  const pending = await pendingSummaries(MAX_PER_RUN);
   const provider = await pickProvider();
+  let pending = await pendingSummaries(maxItems ?? MAX_PER_RUN);
+  let retrying = false;
+
+  // idle run → give once-failed stories exactly one more chance (spec §5 + M6)
+  if (pending.length === 0) {
+    pending = await failedSummaries(RETRY_CAP, RETRY_MAX_AGE_HOURS);
+    retrying = pending.length > 0;
+  }
 
   if (pending.length === 0) {
     return { pending: 0, summarised: 0, failed: 0, hidden: 0, provider, durationMs: 0 };
@@ -68,6 +85,7 @@ export async function summarisePending(): Promise<SummariseSummary> {
               ? await summariseBatchViaGemini(batch)
               : summariseBatchHeuristic(batch);
         const byId = new Map((results ?? []).map((r) => [r.id, r]));
+        const headlineCache = new Map<string, string[]>(); // one query per category per batch
         for (const item of batch) {
           const r = byId.get(item.id);
           if (r) {
@@ -77,13 +95,19 @@ export async function summarisePending(): Promise<SummariseSummary> {
             await applySummary(item.id, r.headline, r.summary, category);
             summarised++;
             // paraphrase dedupe: same story from another outlet → hide this copy
-            const others = await recentHeadlines(category, 3, item.id);
+            let others = headlineCache.get(category);
+            if (!others) {
+              others = await recentHeadlines(category, 3, item.id);
+              headlineCache.set(category, others);
+            }
             if (isFuzzyDuplicate(r.headline, others, HEADLINE_THRESHOLD)) {
               await hideStory(item.id);
               hidden++;
+            } else {
+              others.push(r.headline);
             }
           } else {
-            await markSummariseFailed(item.id); // raw title stays as headline
+            await markSummariseFailed(item.id, retrying); // raw title stays as headline
             failed++;
           }
         }

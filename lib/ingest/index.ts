@@ -4,6 +4,7 @@ import { insertStory, recordRun, recentTitles } from '../db';
 import { RSS_SOURCES } from '../sources';
 import type { Category } from '../types';
 import { summarisePending, type SummariseSummary } from '../summarise';
+import { isHttpUrl } from '../text';
 import { hashUrl, isFuzzyDuplicate } from './dedupe';
 import { fetchFeed, type CandidateItem } from './rss';
 import { fetchSocialViaApi, fetchSocialViaNitter, hasXToken, X_HANDLES } from './x';
@@ -20,20 +21,33 @@ export interface IngestSummary {
 
 const FEED_CONCURRENCY = 8;
 
-let running: Promise<IngestSummary> | null = null;
+export interface RunOptions {
+  /** Cap the summarise pass (used by the cold-start fill to stay within maxDuration). */
+  summariseMax?: number;
+}
+
+let fullRun: Promise<IngestSummary> | null = null;
+let chain: Promise<unknown> = Promise.resolve();
 
 /**
- * Idempotent ingest run. Full runs share one in-flight promise; a
- * category-scoped run (per-column retry) is small and runs independently.
+ * Idempotent ingest run. Concurrent full runs share one in-flight promise;
+ * category-scoped runs (per-column retry) serialise onto the same chain so
+ * two summarise passes can never race over the same pending rows.
  */
-export function runIngest(category?: Category): Promise<IngestSummary> {
-  if (category) return doRun(category);
-  if (!running) {
-    running = doRun().finally(() => {
-      running = null;
-    });
+export function runIngest(category?: Category, opts?: RunOptions): Promise<IngestSummary> {
+  if (!category) {
+    if (!fullRun) {
+      const p = chain.then(() => doRun(undefined, opts));
+      chain = p.catch(() => undefined);
+      fullRun = p.finally(() => {
+        fullRun = null;
+      });
+    }
+    return fullRun;
   }
-  return running;
+  const p = chain.then(() => doRun(category, opts));
+  chain = p.catch(() => undefined);
+  return p;
 }
 
 interface FetchTask {
@@ -53,7 +67,7 @@ function socialTasks(): FetchTask[] {
   }));
 }
 
-async function doRun(category?: Category): Promise<IngestSummary> {
+async function doRun(category?: Category, opts?: RunOptions): Promise<IngestSummary> {
   const started = Date.now();
   const limit = pLimit(FEED_CONCURRENCY);
   // one shared comparison set for fuzzy title dedupe, grown as we insert
@@ -86,7 +100,7 @@ async function doRun(category?: Category): Promise<IngestSummary> {
       summary.failed++; // already logged + recorded inside ingestSource
     }
   }
-  summary.summarise = await summarisePending();
+  summary.summarise = await summarisePending(opts?.summariseMax);
   summary.durationMs = Date.now() - started;
   console.log(JSON.stringify({ event: 'ingest_complete', ...summary }));
   return summary;
@@ -134,6 +148,7 @@ async function ingestTask(
 }
 
 async function insertCandidate(item: CandidateItem, seenTitles: Set<string>): Promise<boolean> {
+  if (!isHttpUrl(item.url)) return false; // feed/mirror could inject javascript: URLs
   if (isFuzzyDuplicate(item.title, seenTitles)) return false;
 
   const inserted = await insertStory({
